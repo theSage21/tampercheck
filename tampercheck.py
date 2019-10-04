@@ -1,8 +1,8 @@
 import random
+import string
 import hashlib
 import argparse
 from itertools import repeat
-import string
 from multiprocessing import Pool, cpu_count
 
 parser = argparse.ArgumentParser()
@@ -17,20 +17,18 @@ parser.add_argument(
 parser.add_argument(
     "--header", help="Header Prefix", default="# tampercheck:", type=str
 )
+parser.add_argument(
+    "-s", "--size", help="How many chars in hexdigest?", default=5, type=int
+)
 args = parser.parse_args()
-found = False
 
 
 def generate(code):
-    global found, pbar
-    while not found:
-        # 32 comes from length of hex digest
-        sig = "".join(random.choice(string.hexdigits) for _ in repeat(None, 32))
-        data = f"""{args.header}{sig}
-{code}""".encode()
+    while True:
+        sig = "".join(random.choice(string.hexdigits) for _ in repeat(None, args.size))
+        data = (f"{args.header}{sig}" + "\n").encode() + code
         predicted = hashlib.md5(data).hexdigest()
-        if predicted == sig:
-            found = True
+        if predicted.startswith(sig):
             return sig, data.decode()
 
 
@@ -40,16 +38,21 @@ data = "".join(code).encode()
 if not code[0].startswith(args.header) and not args.freeze:
     raise Exception(f"File does not contain header '{args.header}'")
 if not args.freeze:
-    sig = code[0][code[0].index(args.header) + len(args.header) :]
-    if hashlib.md5(data).hexdigest() != sig:
+    sig = code[0][code[0].index(args.header) + len(args.header) :].strip()
+    print(f"File has :{sig}")
+    hsh = hashlib.md5(data).hexdigest()
+    print(f"Md5sum is:{hsh}")
+    if not hsh.startswith(sig):
         raise Exception("Headers mismatch")
 else:
     print("Generating signature")
     code = "".join(code[1:]) if code[0].startswith(args.header) else "".join(code)
     with Pool() as pool:
-        work = pool.imap_unordered(generate, [code for _ in range(cpu_count())])
+        work = pool.imap_unordered(
+            generate, [code.encode() for index in range(cpu_count())]
+        )
         for sig, string in work:
             with open(args.file, "w") as fl:
                 fl.write(string)
+            break
     print(f"{args.header}{sig}")
-    print("Done!")
